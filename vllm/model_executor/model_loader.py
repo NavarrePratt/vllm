@@ -41,6 +41,11 @@ _MODEL_CLASSES_SUPPORT_QUANTIZATION = [
     MistralForCausalLM,
 ]
 
+# FIXME(npratt): Remove this once all models support tensorizer.
+_MODEL_CLASSES_SUPPORT_TENSORIZER = [
+    MistralForCausalLM
+]
+
 
 @contextlib.contextmanager
 def _set_default_torch_dtype(dtype: torch.dtype):
@@ -63,6 +68,9 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
 
 def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
+
+    if model_config.load_format == "tensorizer" and model_class not in _MODEL_CLASSES_SUPPORT_TENSORIZER:
+        raise ValueError(f"Tensorizer is not supported for {model_class}.")
 
     # Get the quantization config.
     quant_config = None
@@ -103,6 +111,7 @@ def get_model(model_config: ModelConfig) -> nn.Module:
         else:
             # Load the weights from the cached or downloaded files.
             model.load_weights(model_config.model, model_config.download_dir,
-                               model_config.load_format, model_config.revision)
+                               model_config.load_format, model_config.revision,
+                               model_config.tensorizer_path)
             model = model.cuda()
     return model.eval()

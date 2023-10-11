@@ -48,6 +48,9 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
+        tensorizer_path: File path or s3 URI to the tensorizer model weights
+            file to be used when loading the model with tensorizer. Only
+            required when 'load_format' is tensorizer.
     """
 
     def __init__(
@@ -64,6 +67,7 @@ class ModelConfig:
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        tensorizer_path: Optional[str] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -75,6 +79,7 @@ class ModelConfig:
         self.revision = revision
         self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
+        self.tensorizer_path = tensorizer_path
 
         self.hf_config = get_config(model, trust_remote_code, revision)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
@@ -87,11 +92,11 @@ class ModelConfig:
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()
         if load_format not in [
-                "auto", "pt", "safetensors", "npcache", "dummy"
+                "auto", "pt", "safetensors", "npcache", "dummy", "tensorizer"
         ]:
             raise ValueError(
                 f"Unknown load format: {self.load_format}. Must be one of "
-                "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
+                "'auto', 'pt', 'safetensors', 'npcache', 'tensorizer', or 'dummy'.")
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:

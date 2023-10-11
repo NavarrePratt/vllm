@@ -25,11 +25,14 @@
 The input of the model is flattened to a 1D tensor of tokens. The model uses
 InputMetadata to extract the original 2D shape of the input.
 """
+import time
 from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import MistralConfig
+from tensorizer import TensorDeserializer, stream_io
+from tensorizer.utils import convert_bytes, get_mem_usage
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import SiluAndMul
@@ -296,7 +299,14 @@ class MistralForCausalLM(nn.Module):
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     revision: Optional[str] = None,
+                     tensorizer_path: Optional[str] = None):
+        if load_format == "tensorizer":
+            if tensorizer_path is None:
+                raise ValueError("'tensorizer_path' must be specified when the load_format is 'tensorizer'.")
+            self.load_tensorized_weights(tensorizer_path)
+            return
+
         if self.quant_config is None:
             col_weight_suffixes = ["weight"]
             row_weight_suffixes = ["weight"]
@@ -358,49 +368,21 @@ class MistralForCausalLM(nn.Module):
                         shard_size //= self.quant_config.pack_factor
                         offset //= self.quant_config.pack_factor
 
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[offset:offset + shard_size]
-                assert param_slice.shape == loaded_weight.shape
+    def load_tensorized_weights(self, tensorizer_path: str):
+        before_mem = get_mem_usage()
+        # Lazy load the tensors from S3 into the model.
+        start = time.time()
+        stream = stream_io.open_stream(tensorizer_path, "rb")
+        deserializer = TensorDeserializer(stream, plaid_mode=True)
+        deserializer.load_into_module(self)
+        end = time.time()
 
-                param_slice.copy_(loaded_weight)
-                is_attention_weight = True
-                break
-            if is_attention_weight:
-                continue
-
-            is_gate_up_weight = False
-            for stride_id, weight_name in enumerate(["gate_proj", "up_proj"]):
-                if weight_name not in name:
-                    continue
-                param = state_dict[name.replace(weight_name, "gate_up_proj")]
-                if is_transposed:
-                    param = param.T
-
-                shard_size = param.shape[0] // 2
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[shard_size * stride_id:shard_size *
-                                         (stride_id + 1)]
-                assert param_slice.shape == loaded_weight.shape
-                param_slice.copy_(loaded_weight)
-                is_gate_up_weight = True
-                break
-            if is_gate_up_weight:
-                continue
-
-            param = state_dict[name]
-            if is_transposed:
-                param = param.T
-
-            if "embed_tokens" in name or "lm_head" in name:
-                load_padded_tensor_parallel_vocab(param, loaded_weight,
-                                                  tensor_model_parallel_rank)
-                continue
-
-            load_tensor_parallel_weights(param, loaded_weight, name,
-                                         column_parallel_weights,
-                                         row_parallel_weights,
-                                         tensor_model_parallel_rank)
+        # Brag about how fast we are.
+        total_bytes_str = convert_bytes(deserializer.total_tensor_bytes)
+        duration = end - start
+        per_second = convert_bytes(deserializer.total_tensor_bytes / duration)
+        after_mem = get_mem_usage()
+        deserializer.close()
+        print(f"Deserialized {total_bytes_str} in {end - start:0.2f}s, {per_second}/s")
+        print(f"Memory usage before: {before_mem}")
+        print(f"Memory usage after: {after_mem}")

@@ -32,6 +32,7 @@ class EngineArgs:
     revision: Optional[str] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
+    tensorizer_path: Optional[str] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -86,7 +87,8 @@ class EngineArgs:
             '--load-format',
             type=str,
             default=EngineArgs.load_format,
-            choices=['auto', 'pt', 'safetensors', 'npcache', 'dummy'],
+            choices=['auto', 'pt', 'safetensors', 'npcache', 'dummy',
+                     'tensorizer'],
             help='The format of the model weights to load. '
             '"auto" will try to load the weights in the safetensors format '
             'and fall back to the pytorch bin format if safetensors format '
@@ -97,6 +99,13 @@ class EngineArgs:
             'a numpy cache to speed up the loading. '
             '"dummy" will initialize the weights with random values, '
             'which is mainly for profiling.')
+        parser.add_argument(
+            "--tensorizer-path",
+            type=str,
+            default=None,
+            help="Local path or S3 URI to the tensorized model file to use to"
+                 "load the model weights when the `load_format` is `tensorizer`"
+        )
         parser.add_argument(
             '--dtype',
             type=str,
@@ -189,7 +198,7 @@ class EngineArgs:
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
                                    self.tokenizer_revision, self.max_model_len,
-                                   self.quantization)
+                                   self.quantization, self.tensorizer_path)
         cache_config = CacheConfig(
             self.block_size, self.gpu_memory_utilization, self.swap_space,
             getattr(model_config.hf_config, 'sliding_window', None))
