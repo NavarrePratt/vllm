@@ -1,10 +1,12 @@
 """Utilities for selecting and loading models."""
 import contextlib
+from functools import partial
 from typing import Type
 
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
+from tensorizer.utils import get_mem_usage, no_init_or_tensor
 
 from vllm.config import ModelConfig
 from vllm.model_executor.models import *  # pylint: disable=wildcard-import
@@ -96,13 +98,20 @@ def get_model(model_config: ModelConfig) -> nn.Module:
                 f"method {model_config.quantization}. Supported dtypes: "
                 f"{supported_dtypes}")
 
+    print(f"Memory usage before model creation: {get_mem_usage()}")
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
-        # The weights will be initialized as empty tensors.
         if model_class in _MODEL_CLASSES_SUPPORT_QUANTIZATION:
-            model = model_class(model_config.hf_config, quant_config)
+            model_func = partial(model_class, model_config.hf_config, quant_config)
         else:
-            model = model_class(model_config.hf_config)
+            model_func = partial(model_class, model_config.hf_config)
+
+        if model_config.load_format == "tensorizer":
+            model = no_init_or_tensor(lambda: model_func())
+        else:
+            model = model_func()
+
+        # Load the weights from the cached or downloaded files.
         if model_config.load_format == "dummy":
             model = model.cuda()
             # NOTE(woosuk): For accurate performance evaluation, we assign
