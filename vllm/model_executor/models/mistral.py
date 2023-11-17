@@ -369,21 +369,6 @@ class MistralForCausalLM(nn.Module):
                         offset //= self.quant_config.pack_factor
 
     def load_tensorized_weights(self, tensorizer_path: str):
-        before_mem = get_mem_usage()
         # Lazy load the tensors from S3 into the model.
-        start = time.time()
-        stream = stream_io.open_stream(tensorizer_path, "rb")
-        deserializer = TensorDeserializer(stream, plaid_mode=True)
-        deserializer.load_into_module(self)
-        end = time.time()
-
-        # Brag about how fast we are.
-        total_bytes_str = convert_bytes(deserializer.total_tensor_bytes)
-        duration = end - start
-        per_second = convert_bytes(deserializer.total_tensor_bytes / duration)
-        after_mem = get_mem_usage()
-        deserializer.close()
-
-        print(f"Deserialized {total_bytes_str} in {end - start:0.2f}s, {per_second}/s")
-        print(f"Memory usage before loading weights: {before_mem}")
-        print(f"Memory usage after loading weights: {after_mem}")
+        with TensorDeserializer(tensorizer_path, plaid_mode=True) as tds:
+            tds.load_into_module(self)

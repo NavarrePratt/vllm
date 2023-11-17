@@ -28,6 +28,7 @@ InputMetadata to extract the original 2D shape of the input.
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from tensorizer import TensorDeserializer
 from torch import nn
 from transformers import LlamaConfig
 
@@ -312,7 +313,14 @@ class LlamaForCausalLM(nn.Module):
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     revision: Optional[str] = None,
+                     tensorizer_path: Optional[str] = None):
+        if load_format == "tensorizer":
+            if tensorizer_path is None:
+                raise ValueError("'tensorizer_path' must be specified when the load_format is 'tensorizer'.")
+            self.load_tensorized_weights(tensorizer_path)
+            return
+
         if self.quant_config is None:
             col_weight_suffixes = ["weight"]
             row_weight_suffixes = ["weight"]
@@ -426,3 +434,8 @@ class LlamaForCausalLM(nn.Module):
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          column_parallel_weights,
                                          row_parallel_weights, tp_rank)
+
+    def load_tensorized_weights(self, tensorizer_path: str):
+        # Lazy load the tensors from S3 into the model.
+        with TensorDeserializer(tensorizer_path, plaid_mode=True) as tds:
+            tds.load_into_module(self)

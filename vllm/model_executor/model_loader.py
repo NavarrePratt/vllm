@@ -43,12 +43,6 @@ _MODEL_CLASSES_SUPPORT_QUANTIZATION = [
     MistralForCausalLM,
 ]
 
-# FIXME(npratt): Remove this once all models support tensorizer.
-_MODEL_CLASSES_SUPPORT_TENSORIZER = [
-    MistralForCausalLM
-]
-
-
 @contextlib.contextmanager
 def _set_default_torch_dtype(dtype: torch.dtype):
     """Sets the default torch dtype to the given dtype."""
@@ -70,9 +64,6 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
 
 def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
-
-    if model_config.load_format == "tensorizer" and model_class not in _MODEL_CLASSES_SUPPORT_TENSORIZER:
-        raise ValueError(f"Tensorizer is not supported for {model_class}.")
 
     # Get the quantization config.
     quant_config = None
@@ -101,15 +92,15 @@ def get_model(model_config: ModelConfig) -> nn.Module:
     print(f"Memory usage before model creation: {get_mem_usage()}")
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
+        model_args = [model_config.hf_config]
         if model_class in _MODEL_CLASSES_SUPPORT_QUANTIZATION:
-            model_func = partial(model_class, model_config.hf_config, quant_config)
-        else:
-            model_func = partial(model_class, model_config.hf_config)
+            model_args.append(quant_config)
 
+        # Supress weight initialization  when using tensorizer to save time
         if model_config.load_format == "tensorizer":
-            model = no_init_or_tensor(lambda: model_func())
+            model = no_init_or_tensor(lambda: model_class(*model_args))
         else:
-            model = model_func()
+            model = model_class(*model_args)
 
         # Load the weights from the cached or downloaded files.
         if model_config.load_format == "dummy":

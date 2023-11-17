@@ -24,6 +24,7 @@ InputMetadata to extract the original 2D shape of the input.
 from typing import List, Optional, Tuple
 
 import torch
+from tensorizer import TensorDeserializer
 from torch import nn
 from transformers import GPT2Config
 
@@ -237,7 +238,14 @@ class GPT2LMHeadModel(nn.Module):
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     revision: Optional[str] = None,
+                     tensorizer_path: Optional[str] = None):
+        if load_format == "tensorizer":
+            if tensorizer_path is None:
+                raise ValueError("'tensorizer_path' must be specified when the load_format is 'tensorizer'.")
+            self.load_tensorized_weights(tensorizer_path)
+            return
+
         tensor_model_parallel_world_size = (
             get_tensor_model_parallel_world_size())
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
@@ -303,3 +311,8 @@ class GPT2LMHeadModel(nn.Module):
                                          self._column_parallel_weights,
                                          self._row_parallel_weights,
                                          tensor_model_parallel_rank)
+
+    def load_tensorized_weights(self, tensorizer_path: str):
+        # Lazy load the tensors from S3 into the model.
+        with TensorDeserializer(tensorizer_path, plaid_mode=True) as tds:
+            tds.load_into_module(self)

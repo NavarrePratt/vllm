@@ -22,6 +22,7 @@ import math
 from typing import List, Optional, Tuple, Union
 
 import torch
+from tensorizer import TensorDeserializer
 from torch import nn
 from torch.nn import LayerNorm
 from transformers import FalconConfig as HF_FalconConfig
@@ -425,7 +426,14 @@ class FalconForCausalLM(nn.Module):
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     revision: Optional[str] = None,
+                     tensorizer_path: Optional[str] = None):
+        if load_format == "tensorizer":
+            if tensorizer_path is None:
+                raise ValueError("'tensorizer_path' must be specified when the load_format is 'tensorizer'.")
+            self.load_tensorized_weights(tensorizer_path)
+            return
+
         tp_size = (get_tensor_model_parallel_world_size())
         tp_rank = get_tensor_model_parallel_rank()
 
@@ -501,3 +509,8 @@ class FalconForCausalLM(nn.Module):
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          self._column_parallel_weights,
                                          self._row_parallel_weights, tp_rank)
+
+    def load_tensorized_weights(self, tensorizer_path: str):
+        # Lazy load the tensors from S3 into the model.
+        with TensorDeserializer(tensorizer_path, plaid_mode=True) as tds:
+            tds.load_into_module(self)
